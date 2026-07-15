@@ -1,0 +1,30 @@
+{
+  "name": "ai-chatbot-website",
+  "version": "1.0.0",
+  "description": "Website AI Chatbot sederhana menggunakan Node.js, Express.js, dan OpenAI API",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "chatbot",
+    "openai",
+    "express",
+    "ai"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "openai": "^4.63.0",
+    "serverless-http": "^4.0.0",
+    "uuid": "^9.0.1"
+  }
+}
