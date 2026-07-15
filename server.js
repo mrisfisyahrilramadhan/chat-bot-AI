@@ -28,18 +28,31 @@ app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname))); // serve index.html, style.css, script.js
 
-// ---------- Simple JSON "Database" ----------
-// Catatan: Vercel & Netlify Functions memiliki filesystem read-only,
-// kecuali folder /tmp yang bersifat sementara (reset saat cold start).
-// Untuk penyimpanan permanen di production, disarankan deploy ke Render
-// atau mengganti bagian ini dengan database sungguhan (MongoDB, dsb).
+// ---------- Database ----------
+// Prioritas: Upstash Redis (persisten, konsisten di semua instance server —
+// dibutuhkan untuk deploy ke Vercel/Netlify yang serverless). Kalau env
+// Redis tidak diset (misalnya waktu development lokal atau di Render),
+// otomatis fallback ke file JSON sederhana seperti sebelumnya.
+const { Redis } = require("@upstash/redis");
+
+const REDIS_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+const REDIS_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+const useRedis = Boolean(REDIS_URL && REDIS_TOKEN);
+
+let redis = null;
+if (useRedis) {
+  redis = new Redis({ url: REDIS_URL, token: REDIS_TOKEN });
+}
+
+const REDIS_DB_KEY = "ai_chatbot_db";
+
 const isServerless = Boolean(process.env.VERCEL || process.env.NETLIFY);
 const DB_DIR = isServerless
   ? path.join(require("os").tmpdir(), "ai-chatbot-data")
   : path.join(__dirname, "data");
 const DB_FILE = path.join(DB_DIR, "db.json");
 
-function ensureDb() {
+function ensureDbFile() {
   if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
   if (!fs.existsSync(DB_FILE)) {
     fs.writeFileSync(
@@ -50,8 +63,12 @@ function ensureDb() {
   }
 }
 
-function readDb() {
-  ensureDb();
+async function readDb() {
+  if (useRedis) {
+    const data = await redis.get(REDIS_DB_KEY);
+    return data || { users: {}, chats: {} };
+  }
+  ensureDbFile();
   const raw = fs.readFileSync(DB_FILE, "utf-8");
   try {
     return JSON.parse(raw);
@@ -60,7 +77,12 @@ function readDb() {
   }
 }
 
-function writeDb(db) {
+async function writeDb(db) {
+  if (useRedis) {
+    await redis.set(REDIS_DB_KEY, db);
+    return;
+  }
+  ensureDbFile();
   fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), "utf-8");
 }
 
@@ -90,7 +112,7 @@ if (process.env.OPENAI_API_KEY) {
  * Jika username belum ada -> buat user baru.
  * Jika sudah ada -> login ke user tersebut.
  */
-app.post("/api/login", (req, res) => {
+app.post("/api/login", async (req, res) => {
   const { username } = req.body;
 
   if (!username || !username.trim()) {
@@ -111,7 +133,7 @@ app.post("/api/login", (req, res) => {
     });
   }
 
-  const db = readDb();
+  const db = await readDb();
   const userId = "user_" + cleanUsername.toLowerCase();
 
   if (!db.users[userId]) {
@@ -122,7 +144,7 @@ app.post("/api/login", (req, res) => {
       createdAt: new Date().toISOString(),
     };
     db.chats[userId] = [];
-    writeDb(db);
+    await writeDb(db);
   }
 
   const user = db.users[userId];
@@ -133,8 +155,8 @@ app.post("/api/login", (req, res) => {
  * POST /api/guest
  * Membuat sesi guest baru dengan nama Guest-xxxx
  */
-app.post("/api/guest", (req, res) => {
-  const db = readDb();
+app.post("/api/guest", async (req, res) => {
+  const db = await readDb();
   const randomNumber = Math.floor(1000 + Math.random() * 9000);
   const guestName = `Guest-${randomNumber}`;
   const userId = "guest_" + uuidv4();
@@ -146,7 +168,7 @@ app.post("/api/guest", (req, res) => {
     createdAt: new Date().toISOString(),
   };
   db.chats[userId] = [];
-  writeDb(db);
+  await writeDb(db);
 
   return res.json({ userId, username: guestName, type: "guest" });
 });
@@ -159,9 +181,9 @@ app.post("/api/guest", (req, res) => {
  * GET /api/chats/:userId
  * Mendapatkan daftar chat session milik seorang user
  */
-app.get("/api/chats/:userId", (req, res) => {
+app.get("/api/chats/:userId", async (req, res) => {
   const { userId } = req.params;
-  const db = readDb();
+  const db = await readDb();
 
   if (!db.users[userId]) {
     return res.status(404).json({ error: "User tidak ditemukan." });
@@ -184,9 +206,9 @@ app.get("/api/chats/:userId", (req, res) => {
  * POST /api/chats/:userId
  * Membuat chat session baru ("New Chat")
  */
-app.post("/api/chats/:userId", (req, res) => {
+app.post("/api/chats/:userId", async (req, res) => {
   const { userId } = req.params;
-  const db = readDb();
+  const db = await readDb();
 
   if (!db.users[userId]) {
     return res.status(404).json({ error: "User tidak ditemukan." });
@@ -202,7 +224,7 @@ app.post("/api/chats/:userId", (req, res) => {
 
   if (!db.chats[userId]) db.chats[userId] = [];
   db.chats[userId].push(newChat);
-  writeDb(db);
+  await writeDb(db);
 
   return res.json({
     id: newChat.id,
@@ -216,9 +238,9 @@ app.post("/api/chats/:userId", (req, res) => {
  * GET /api/chats/:userId/:chatId
  * Mendapatkan seluruh pesan dalam satu chat session
  */
-app.get("/api/chats/:userId/:chatId", (req, res) => {
+app.get("/api/chats/:userId/:chatId", async (req, res) => {
   const { userId, chatId } = req.params;
-  const db = readDb();
+  const db = await readDb();
 
   const userChats = db.chats[userId];
   if (!userChats) return res.status(404).json({ error: "Chat tidak ditemukan." });
@@ -233,14 +255,14 @@ app.get("/api/chats/:userId/:chatId", (req, res) => {
  * DELETE /api/chats/:userId/:chatId
  * Menghapus chat session
  */
-app.delete("/api/chats/:userId/:chatId", (req, res) => {
+app.delete("/api/chats/:userId/:chatId", async (req, res) => {
   const { userId, chatId } = req.params;
-  const db = readDb();
+  const db = await readDb();
 
   if (!db.chats[userId]) return res.status(404).json({ error: "Chat tidak ditemukan." });
 
   db.chats[userId] = db.chats[userId].filter((c) => c.id !== chatId);
-  writeDb(db);
+  await writeDb(db);
 
   return res.json({ success: true });
 });
@@ -262,7 +284,7 @@ app.post("/api/chat/:userId/:chatId", async (req, res) => {
     return res.status(400).json({ error: "Pesan tidak boleh kosong." });
   }
 
-  const db = readDb();
+  const db = await readDb();
   const userChats = db.chats[userId];
   if (!userChats) return res.status(404).json({ error: "User tidak ditemukan." });
 
@@ -327,7 +349,7 @@ app.post("/api/chat/:userId/:chatId", async (req, res) => {
     chat.messages.push(aiMessage);
     chat.updatedAt = new Date().toISOString();
 
-    writeDb(db);
+    await writeDb(db);
 
     return res.json({
       reply: aiMessage,
@@ -351,11 +373,16 @@ app.get("/", (req, res) => {
 // Saat dijalankan di platform serverless (Vercel/Netlify), app.listen()
 // tidak dipanggil oleh platform tersebut — hanya dipakai untuk run lokal
 // atau di Render (yang butuh long-running server).
-ensureDb();
+if (!useRedis) ensureDbFile();
 
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`✅ Server berjalan di http://localhost:${PORT}`);
+    console.log(
+      useRedis
+        ? "🗄️  Penyimpanan: Upstash Redis"
+        : "🗄️  Penyimpanan: file JSON lokal (data/db.json)"
+    );
     if (!process.env.OPENAI_API_KEY) {
       console.log(
         "⚠️  OPENAI_API_KEY belum diatur. Salin .env.example menjadi .env dan isi API key."
