@@ -471,7 +471,11 @@ input {
 .chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 24px 18%;
+  padding: 24px 24px;
+  max-width: 900px;
+  width: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -696,7 +700,11 @@ input {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 18% 12px;
+  padding: 6px 24px 12px;
+  max-width: 900px;
+  width: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
   color: var(--text-secondary);
   font-size: 13px;
   flex-shrink: 0;
@@ -728,13 +736,20 @@ input {
 
 /* ---------------- Input Area ---------------- */
 
+.chat-input-wrapper {
+  border-top: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
 .chat-input-area {
   display: flex;
   align-items: flex-end;
   gap: 10px;
-  padding: 14px 18%;
-  border-top: 1px solid var(--border-color);
-  flex-shrink: 0;
+  padding: 14px 24px;
+  max-width: 900px;
+  width: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
 }
 
 .chat-input {
@@ -852,8 +867,8 @@ input {
   .chat-messages,
   .chat-input-area,
   .typing-indicator {
-    padding-left: 6%;
-    padding-right: 6%;
+    padding-left: 20px;
+    padding-right: 20px;
   }
 }
 
@@ -897,8 +912,8 @@ input {
   .chat-messages,
   .chat-input-area,
   .typing-indicator {
-    padding-left: 4%;
-    padding-right: 4%;
+    padding-left: 14px;
+    padding-right: 14px;
   }
 }
 
